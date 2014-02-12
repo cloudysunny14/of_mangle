@@ -18,6 +18,7 @@ import logging
 
 from ryu.base import app_manager
 from ryu.exception import OFPUnknownVersion
+from ryu.exception import RyuException
 from ryu.lib import ofctl_v1_0
 from ryu.lib import ofctl_v1_2
 from ryu.lib import ofctl_v1_3
@@ -35,7 +36,7 @@ from ryu.lib.packet import ethernet
 
 ARP_FLOW_PRIORITY = ofproto_v1_3_parser.UINT16_MAX - 1
 OUTPUT_FLOW_PRIORITY = 1
-# Reserved Tables
+# Built-in chain 
 # [INPUT] - [PREFORWARD] -[FORWARD] - [OUTPUT]
 MANGLE_INPUT_TABLE_ID = 0
 MANGLE_PREFORWARD_TABLE_ID = 1
@@ -73,6 +74,7 @@ MANGLE_CHAIN_OUTPUT = 'output'
 MANGLE_NW_PROTO_TCP = 'tcp'
 MANGLE_NW_PROTO_UDP = 'udp'
 MANGLE_NW_PROTO_ICMP = 'icmp'
+
 #TODO: Compatible with VLAN_ID
 # Cookie mask format
 # (LSB)  1       2       3   (MSB)4
@@ -160,12 +162,11 @@ class QoSLib(app_manager.RyuApp):
         return switch
 
     def add_mangle(self, mangle):
-        #TODO:Excption
         if mangle.is_built:
-            raise Exception()
-        mangle.build(self.waiters)
+            raise MangleAlreadyBuildError(mangle=mangle) 
         datapath = mangle.dp
         switch = self.get_switch(datapath)
+        mangle.build(self.waiters, switch)
         properties = mangle.properties
         cookie = MANGLE_DEFAULT_COOKIE
         cookie_mask = MANGLE_DEFAULT_COOKIE_MASK
@@ -178,7 +179,6 @@ class QoSLib(app_manager.RyuApp):
         if properties.has_key(MANGLE_CHAIN):
             table_id = switch.chains_to_table_id(properties[MANGLE_CHAIN])
         if mangle.has_address_list:
-            LOG.info('%s', mangle.address_list_dict)
             list_dic = mangle.address_list_dict
             list_name = list_dic.keys()[0]
             cookie = switch.get_cookie_for_list(list_name,
@@ -203,6 +203,16 @@ class QoSLib(app_manager.RyuApp):
                 'actions': actions}
         return flow
 
+class MangleAlreadyBuildError(RyuException):
+    message = 'Mangle is already build. : mangle=%(mangle)s'
+
+class MangleAlreadyAddedListError(RyuException):
+    message = 'Mangle is already build. : list_name=%(list_name)s,\
+               list=%(list)s'
+
+class MangleValidateError(RyuException):
+    message = 'Mangle is not valid : msg=%(msg)s mangle=%(mangle)s'
+
 class _Mangle(object):
 
     def __init__(self, datapath):
@@ -214,37 +224,59 @@ class _Mangle(object):
         self.has_address_list = False
 
     def add_property(self, p, v):
+        if self.is_built:
+           raise MangleAlreadyBuildError(mangle=self.properties)
         self.properties[p] = v
         return self
 
     def address_list(self, list_name, address_list):
-        #TODO: validate address
+        if self.has_address_list:
+            name_list = self.address_list_dict.keys()[0]
+            add_list = self.address_list_dict[name_list]
+            raise MangleAlreadyAddedListError(list_name=name_list,
+                                              list=add_list)
         self.has_address_list = True
         self.address_list_dict[list_name] = address_list
 
-    def _validate_mangle(self, waiters):
+    def _validate_mangle(self, waiters, switch):
         """Validate mangle entry"""
         #Search flow table.etc
         msgs = self.ofctl.get_flow_stats(self.dp, waiters)
         if self.properties.has_key(MANGLE_ACTION_ACCEPT):
-            pass
-        elif self.properties.has_key(
+            table_id = self.properties.get(MANGLE_CHAIN, None)
+            if table_id == MANGLE_OUTPUT_TABLE_ID:
+                #Action accept is can't set to output chain.
+                self.properties[MANGLE_CHAIN] = MANGLE_INPUT_TABLE_ID
+                pass
+        if self.properties.has_key(
                  MANGLE_ACTION_ADD_DST_TO_ADDRESS_LIST) or \
              self.properties.has_key(
                  MANGLE_ACTION_ADD_SRC_TO_ADDRESS_LIST):
                if not self.properties.has_key(MANGLE_ADDRESS_LIST):
                    return False, 'Action add list required to specify\
                                   list'
-        elif self.properties.has_key(MANGLE_JUMP):
+        if self.properties.has_key(MANGLE_DST_ADDRESS_LIST) or \
+           self.properties.has_key(MANGLE_SRC_ADDRESS_LIST):
+            list_name = self.properties.get(MANGLE_DST_ADDRESS_LIST,
+                                self.properties[MANGLE_SRC_ADDRESS_LIST])
+            if not self.address_list_dict.has_key(list_name) and \
+                not switch.address_list.has_key(list_name):
+                return False, 'Specify list is not exist'
+            else:
+                self.has_address_list = True
+                
+        if self.properties.has_key(MANGLE_JUMP):
             if not self.propoeries.has_key(MANGLE_JUMP_TARGET):
                 return False, 'Action jump required to specify\
                                jump target.'
 
         LOG.debug('%s', msgs)
-        return True
+        return True, ''
 
-    def build(self, waiters):
-        self._validate_mangle(waiters)
+    def build(self, waiters, switch):
+        result, msg = self._validate_mangle(waiters, switch)
+        if not result:
+            raise MangleValidateError(msg=msg, mangle=self.properties)
         self.is_built = True
         return self
 

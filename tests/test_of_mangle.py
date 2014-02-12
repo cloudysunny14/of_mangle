@@ -89,10 +89,12 @@ You can find the sample config I used for the test below:
 ].
 
 Then run linc
-# rel/linc/bin/linc console
+# sudo rel/linc/bin/linc console
 
 Then run ryu
-# PYTHONPATH=$RYU_HOME:. $RYU_HOME/bin/ryu-manager --verbose\
+# cd of_mangle
+# export RYUHOME=$HOME/ryu
+# PYTHONPATH=$RYUHOME:. $RYUHOME/bin/ryu-manager --verbose\
     tests/test_of_mangle.py
 """
 import logging
