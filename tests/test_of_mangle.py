@@ -118,6 +118,7 @@ from app import qoslib
 LOG = logging.getLogger(__name__)
 LOG_TEST_FINISH = 'TEST_FINISHED: Tests=[%s] (OK=%s NG=%s SKIP=%s)'
 
+
 def get_flow_stats(dp, waiters, ofctl):
     table_id = dp.ofproto.OFPTT_ALL
     flags = 0
@@ -152,6 +153,7 @@ def get_flow_stats(dp, waiters, ofctl):
 
     return flows
 
+
 def delete_all_flows(dp):
     match = dp.ofproto_parser.OFPMatch()
     m = dp.ofproto_parser.OFPFlowMod(dp, 0, 0, dp.ofproto.OFPTT_ALL,
@@ -162,6 +164,7 @@ def delete_all_flows(dp):
                                      0, match, [])
 
     dp.send_msg(m)
+
 
 class OFMangleTester(app_manager.RyuApp):
 
@@ -233,8 +236,8 @@ class OFMangleTester(app_manager.RyuApp):
     def test_action_accept(self):
         mangle = qoslib.QoSLib.mangle(self.dp)
         mangle.add_property('action', 'accept').\
-        add_property('dst-address', '10.0.0.2').\
-        add_property('chain', 'forward')
+            add_property('dst-address', '10.0.0.2').\
+            add_property('chain', 'forward')
         self.qoslib.add_mangle(mangle)
         msg = get_flow_stats(self.dp, self.waiters, self.ofctl)
         flow = msg[msg.keys()[0]][0]
@@ -246,18 +249,18 @@ class OFMangleTester(app_manager.RyuApp):
         mangle = qoslib.QoSLib.mangle(self.dp)
         mangle.address_list('first', ['10.0.0.2', '10.0.0.3'])
         mangle.add_property('action', 'accept').\
-        add_property('dst-address-list', 'first').\
-        add_property('chain', 'forward')
+            add_property('dst-address-list', 'first').\
+            add_property('chain', 'forward')
         self.qoslib.add_mangle(mangle)
         msg = get_flow_stats(self.dp, self.waiters, self.ofctl)
         flow = msg[msg.keys()[0]]
         return ([{'hard_timeout': 0, 'actions': ['GOTO_TABLE:3'],
                   'priority': 0, 'idle_timeout': 0, 'cookie': 1056768,
                   'table_id': 2, 'match': {'dl_type': 2048, 'nw_dst': '10.0.0.3'}},
-                  {'hard_timeout': 0, 'actions': ['GOTO_TABLE:3'],
-                    'priority': 0, 'idle_timeout': 0, 'cookie': 1056768,
-                    'table_id': 2,
-                    'match': {'dl_type': 2048, 'nw_dst': '10.0.0.2'}}] == flow)
+                 {'hard_timeout': 0, 'actions': ['GOTO_TABLE:3'],
+                  'priority': 0, 'idle_timeout': 0, 'cookie': 1056768,
+                  'table_id': 2,
+                  'match': {'dl_type': 2048, 'nw_dst': '10.0.0.2'}}] == flow)
 
     def _print_results(self):
         LOG.info("TEST_RESULTS:")

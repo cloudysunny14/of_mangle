@@ -22,10 +22,11 @@ from app import qoslib
 
 from nose.tools import *
 
+
 class _Datapath(object):
     ofproto = ofproto_v1_3
     ofproto_parser = ofproto_v1_3_parser
-    
+
     def set_xid(self, xid):
         self.xid = xid
 
@@ -35,7 +36,9 @@ class _Datapath(object):
     def send_msg(self, msg):
         pass
 
+
 class TestQosLib(unittest.TestCase):
+
     """ Test case for QoS lib
     """
 
@@ -51,11 +54,11 @@ class TestQosLib(unittest.TestCase):
     def test_mangle_already_build(self):
         mangle = qoslib.QoSLib.mangle(self.datapath)
         mangle.add_property('action', 'accept').\
-        add_property('dst-address', '10.0.0.2').\
-        add_property('chain', 'forward')
+            add_property('dst-address', '10.0.0.2').\
+            add_property('chain', 'forward')
         self.qoslib.add_mangle(mangle)
         mangle.add_property('src-address', '10.0.0.3')
-    
+
     @raises(qoslib.MangleAlreadyAddedListError)
     def test_mangle_address_list_notexist(self):
         mangle = qoslib.QoSLib.mangle(self.datapath)
@@ -67,16 +70,16 @@ class TestQosLib(unittest.TestCase):
         mangle = qoslib.QoSLib.mangle(self.datapath)
         mangle.address_list('first', ['10.0.1.2', '10.0.1.3'])
         mangle.add_property('action', 'accept').\
-        add_property('src-address-list', 'nothing').\
-        add_property('chain', 'forward')
+            add_property('src-address-list', 'nothing').\
+            add_property('chain', 'forward')
         self.qoslib.add_mangle(mangle)
 
     def test_mangle_exist_list(self):
         mangle = qoslib.QoSLib.mangle(self.datapath)
         mangle.address_list('first', ['10.0.2.3', '10.0.2.4'])
         mangle.add_property('action', 'accept').\
-        add_property('src-address-list', 'first').\
-        add_property('chain', 'forward')
+            add_property('src-address-list', 'first').\
+            add_property('chain', 'forward')
         self.qoslib.add_mangle(mangle)
 
 
