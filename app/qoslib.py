@@ -489,10 +489,15 @@ class _Switch(object):
 
 class _Queue(object):
 
-    """"""
+    """ Queue Settins """
 
-    def __init__(self, datapath):
-        """ not implemented yet."""
+    def __init__(self, datapath, ip_address, port, user, password):
+        self.ofconfig = "Connected instance"
+        self.queues = {}
+
+    def add_queue(self, queue_name, min_rate, max_rate):
+        """"""
+        #self._validation()
 
 
 class _OFCtl(object):

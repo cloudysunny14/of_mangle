@@ -262,6 +262,22 @@ class OFMangleTester(app_manager.RyuApp):
                   'table_id': 2,
                   'match': {'dl_type': 2048, 'nw_dst': '10.0.0.2'}}] == flow)
 
+    def test_add_queue(self):
+        queue = qoslib.QoSLib.QueueTree('localhost', '1830', 'linc', 'linc')
+        queue.add_queue('high-priority', '500', '500')
+        config = queue.get_config()
+        print config
+
+    def test_queue_configuration(self):
+        queue = qoslib.QoSLib.QueueTree('localhost', '1830', 'linc', 'linc')
+        queue.add_queue('best-effort', '100', '100')
+        mangle = qoslib.QoSLib.mangle(self.dp)
+        mangle.add_property('action', 'mark-packet').\
+            add_property('new-packet-mark', 'best-effort')
+        self.qoslib.add_mangle(mangle)
+        msg = get_flow_stats(self.dp, self.waiters, self.ofctl)
+        print msg
+
     def _print_results(self):
         LOG.info("TEST_RESULTS:")
         ok = 0
