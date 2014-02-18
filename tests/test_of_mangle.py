@@ -31,6 +31,8 @@ You can find the sample config I used for the test below:
     ]},
    {capable_switch_queues,
     [
+      {queue, 1, [{min_rate, 100}, {max_rate, 100}]},
+      {queue, 2, [{min_rate, 100}, {max_rate, 100}]}
     ]},
    {logical_switches,
     [
@@ -41,10 +43,10 @@ You can find the sample config I used for the test below:
         [
          {"Switch0-DefaultController", "localhost", 6633, tcp}
         ]},
-       {queues_status, disabled},
+       {queues_status, enabled},
        {ports, [
-                {port, 1, {queues, []}},
-                {port, 2, {queues, []}}
+                {port, 1, {queues, [1,2]}},
+                {port, 2, {queues, [1,2]}}
                ]}
       ]}
     ]}
@@ -107,6 +109,7 @@ from ryu.lib import ofctl_v1_0
 from ryu.lib import ofctl_v1_2
 from ryu.lib import ofctl_v1_3
 from ryu.lib import hub
+from ryu.lib.of_config import capable_switch
 from ryu.controller import ofp_event
 from ryu.controller import dpset
 from ryu.controller.handler import MAIN_DISPATCHER
@@ -169,6 +172,7 @@ def delete_all_flows(dp):
 class OFMangleTester(app_manager.RyuApp):
 
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
+    
     _CONTEXTS = {'dpset': dpset.DPSet,
                  'qoslib': qoslib.QoSLib}
 
@@ -184,6 +188,13 @@ class OFMangleTester(app_manager.RyuApp):
         self.waiters = {}
         self.pending = []
         self.results = {}
+        self.capable_switch = capable_switch.OFCapableSwitch(
+                                  host='localhost',
+                                  port=1830,
+                                  username='linc',
+                                  password='linc',
+                                  unknown_host_cb=lambda host,
+                                  fingeprint: True)
 
         for t in dir(self):
             if t.startswith("test_"):
@@ -263,20 +274,21 @@ class OFMangleTester(app_manager.RyuApp):
                   'match': {'dl_type': 2048, 'nw_dst': '10.0.0.2'}}] == flow)
 
     def test_add_queue(self):
-        queue = qoslib.QoSLib.QueueTree('localhost', '1830', 'linc', 'linc')
-        queue.add_queue('high-priority', '500', '500')
-        config = queue.get_config()
-        print config
+        queue = qoslib.QoSLib.queue_tree(self.capable_switch, self.dp)
+        queue.queue('high-priority', '500', '500')
+        self.qoslib.register_queue(queue)
+        return True
 
-    def test_queue_configuration(self):
-        queue = qoslib.QoSLib.QueueTree('localhost', '1830', 'linc', 'linc')
-        queue.add_queue('best-effort', '100', '100')
+    def _test_queue_configuration(self):
+        queue = qoslib.QoSLib.queue_tree(self.capable_switch, self.dp)
+        queue.queue('best-effort', '100', '100')
+        qoslib.register_queue(queue)
         mangle = qoslib.QoSLib.mangle(self.dp)
         mangle.add_property('action', 'mark-packet').\
             add_property('new-packet-mark', 'best-effort')
         self.qoslib.add_mangle(mangle)
         msg = get_flow_stats(self.dp, self.waiters, self.ofctl)
-        print msg
+        print 'TEST:%s', msg
 
     def _print_results(self):
         LOG.info("TEST_RESULTS:")

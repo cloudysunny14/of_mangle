@@ -33,6 +33,8 @@ from ryu.ofproto import ether
 from ryu.ofproto import inet
 from ryu.lib.packet import packet
 from ryu.lib.packet import ethernet
+from ryu.lib.of_config.capable_switch import OFCapableSwitch
+import ryu.lib.of_config.classes as ofc
 
 ARP_FLOW_PRIORITY = ofproto_v1_3_parser.UINT16_MAX - 1
 OUTPUT_FLOW_PRIORITY = 1
@@ -119,6 +121,8 @@ class QoSLib(app_manager.RyuApp):
         self.current_table_id = MANGLE_INPUT_TABLE_ID
         self.waiters = {}
         self.use_switch_flow = True
+        #{queue_name: [resource_ids,..]}
+        self.queues = {}
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
@@ -165,8 +169,9 @@ class QoSLib(app_manager.RyuApp):
         return mangle
 
     @staticmethod
-    def queue_tree(datapath):
-        """ not implemented yet."""
+    def queue_tree(peer, datapath):
+        queue_tree = _QueueTree(peer, datapath)
+        return queue_tree
 
     def get_switch(self, datapath):
         switch = self.switches.get(datapath.id, None)
@@ -218,6 +223,25 @@ class QoSLib(app_manager.RyuApp):
                 'match': match,
                 'actions': actions}
         return flow
+
+    def register_queue(self, queue):
+        """"""
+        resources = []
+        if queue.name in self.queues:
+            resources = self.queues[queue.name]
+        elif len(self.queues.values()):
+            for queues in queue.queue_ids.values():
+                filled_res = reduce(lambda q1, q2: q1 + q2,
+                                       self.queues.values())
+                f_queue = list(set(queues) - set(filled_res))
+                if len(f_queue):
+                    resources.append(f_queue[0])
+        else:
+          for queues in queue.queue_ids.values():
+              resources.append(queues[0])
+        if not len(resources):
+            raise Exception()
+        queue.edit_config(resources)
 
 
 class MangleAlreadyBuildError(RyuException):
@@ -486,18 +510,81 @@ class _Switch(object):
             self.address_list[list_name] = cookie_value
         return self.address_list[list_name]
 
+def _str_to_dpid(dpid):
+    dpid_str = str(dpid)
+    if dpid_str.find(':'):
+        dpid_str = ''.join(dpid_str.split(':'))
+    return int(dpid_str[:12], 16)
 
-class _Queue(object):
+OF_CONFIG_TARGET = 'running'
+
+class _QueueTree(object):
 
     """ Queue Settins """
 
-    def __init__(self, datapath, ip_address, port, user, password):
-        self.ofconfig = "Connected instance"
+    def __init__(self, peer, datapath):
+        self.peer = peer
+        self.datapath_id = datapath.id
         self.queues = {}
+        self.capable_switch = None
+        self.name = None
+        self.max_rate = 0
+        self.min_rate = 0
+        #{port_id: [queue_ids...],}
+        self.queue_ids = {} 
 
-    def add_queue(self, queue_name, min_rate, max_rate):
+    def _validation(self):
+        if not isinstance(self.peer, OFCapableSwitch):
+            return False, 'Peer is not configuration point.'
+        return True, ''
+
+    def queue(self, queue_name, min_rate, max_rate):
         """"""
-        #self._validation()
+        result, msg = self._validation()
+        if not result:
+            #TODO: 
+            raise Exception()
+        self.name = queue_name
+        self.min_rate = min_rate
+        self.max_rate = max_rate
+        self.capable_switch = self.peer.get()
+        for logical_switch in self.capable_switch.logical_switches.switch:
+            datapath_id = _str_to_dpid(logical_switch.datapath_id)
+            if self.datapath_id == datapath_id:
+                resources = logical_switch.resources
+                for port_id in resources.port:
+                    self.queue_ids[port_id] = []
+                for queue_id in logical_switch.resources.queue:
+                    for port_id in self.queue_ids.keys():
+                        queue_list = []
+                        if str(queue_id).startswith(str(port_id)):
+                            queue_list = self.queue_ids[str(port_id)]
+                        queue_list.append(str(queue_id))
+                        self.queue_ids[port_id] = queue_list
+
+    def edit_config(self, resources):
+        capable_switch_id = self.capable_switch.id
+        for queue in resources:
+            try:
+                capable_switch = ofc.OFCapableSwitchType(
+                    id=capable_switch_id,
+                    resources=ofc.OFCapableSwitchResourcesType(
+                        queue=[
+                            ofc.OFQueueType(
+                                resource_id=queue,
+                                properties=ofc.OFQueuePropertiesType(
+                                    max_rate=self.max_rate,
+                                    min_rate=self.min_rate))
+                        ]
+                    )
+                )
+            except TypeError:
+                print "argument error"
+                return
+            try:
+                self.peer.edit_config(OF_CONFIG_TARGET, capable_switch)
+            except Exception, e:
+               print e
 
 
 class _OFCtl(object):
