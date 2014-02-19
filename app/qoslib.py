@@ -57,6 +57,7 @@ MANGLE_ACTION_CONTROLLER = 'controller'
 MANGLE_ACTION_ADD_DST_TO_ADDRESS_LIST = 'add-dst-to-address-list'
 MANGLE_ACTION_ADD_SRC_TO_ADDRESS_LIST = 'add-src-to-address-list'
 MANGLE_JUMP = 'jump'
+MANGLE_ACTION_MARK_PACKET = 'mark-packet'
 
 MANGLE_JUMP_TARGET = 'jump-target'
 MANGLE_ADDRESS_LIST = 'address-list'
@@ -121,8 +122,6 @@ class QoSLib(app_manager.RyuApp):
         self.current_table_id = MANGLE_INPUT_TABLE_ID
         self.waiters = {}
         self.use_switch_flow = True
-        #{queue_name: [resource_ids,..]}
-        self.queues = {}
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
@@ -227,12 +226,13 @@ class QoSLib(app_manager.RyuApp):
     def register_queue(self, queue):
         """"""
         resources = []
-        if queue.name in self.queues:
-            resources = self.queues[queue.name]
-        elif len(self.queues.values()):
+        switch = self.get_switch(queue.datapath)
+        if queue.name in switch.queues.keys():
+            resources = switch.queues[queue.name].keys()
+        elif len(switch.queues.values()):
             for queues in queue.queue_ids.values():
                 filled_res = reduce(lambda q1, q2: q1 + q2,
-                                       self.queues.values())
+                                       switch.queues.values())
                 f_queue = list(set(queues) - set(filled_res))
                 if len(f_queue):
                     resources.append(f_queue[0])
@@ -241,6 +241,8 @@ class QoSLib(app_manager.RyuApp):
               resources.append(queues[0])
         if not len(resources):
             raise Exception()
+        queue_id_mapping = queue.get_queue_mapping(resources)
+        switch.queues[queue.name] = queue_id_mapping
         queue.edit_config(resources)
 
 
@@ -430,6 +432,11 @@ class _Switch(object):
         self.address_list = {}
         self.current_list_value = 0
         self.mac_to_port = {}
+        #{queue_name: {resource_id: queue_id, ...}}
+        self.queues = {}
+        #{mark: dscp, ..}
+        self.dscp_mark_mapping = {}
+        self.current_dscp = 1
 
     def set_arp_flow(self):
         ofproto = self.datapath.ofproto
@@ -524,7 +531,7 @@ class _QueueTree(object):
 
     def __init__(self, peer, datapath):
         self.peer = peer
-        self.datapath_id = datapath.id
+        self.datapath = datapath
         self.queues = {}
         self.capable_switch = None
         self.name = None
@@ -538,19 +545,19 @@ class _QueueTree(object):
             return False, 'Peer is not configuration point.'
         return True, ''
 
-    def queue(self, queue_name, min_rate, max_rate):
+    def queue(self, name, min_rate, max_rate):
         """"""
         result, msg = self._validation()
         if not result:
             #TODO: 
             raise Exception()
-        self.name = queue_name
+        self.name = name 
         self.min_rate = min_rate
         self.max_rate = max_rate
         self.capable_switch = self.peer.get()
         for logical_switch in self.capable_switch.logical_switches.switch:
             datapath_id = _str_to_dpid(logical_switch.datapath_id)
-            if self.datapath_id == datapath_id:
+            if self.datapath.id == datapath_id:
                 resources = logical_switch.resources
                 for port_id in resources.port:
                     self.queue_ids[port_id] = []
@@ -561,6 +568,19 @@ class _QueueTree(object):
                             queue_list = self.queue_ids[str(port_id)]
                         queue_list.append(str(queue_id))
                         self.queue_ids[port_id] = queue_list
+
+    def get_queue_mapping(self, resources):
+        capable_resources = self.capable_switch.resources.queue
+        queue_id_map = {}
+        for queue in capable_resources:
+            queue_resource_id = str(queue.resource_id)
+            if queue_resource_id in resources:
+                queue_id_map[queue_resource_id] = str(queue.id)
+        if len(set(queue_id_map.values())) > 1:
+            # Incorrect queue sequence.
+            raise Exception()
+        LOG.info("Mapped Queue:%s", queue_id_map)
+        return queue_id_map
 
     def edit_config(self, resources):
         capable_switch_id = self.capable_switch.id

@@ -279,14 +279,20 @@ class OFMangleTester(app_manager.RyuApp):
         self.qoslib.register_queue(queue)
         return True
 
-    def _test_queue_configuration(self):
+    def test_queue_configuration(self):
         queue = qoslib.QoSLib.queue_tree(self.capable_switch, self.dp)
-        queue.queue('best-effort', '100', '100')
+        queue.queue('best-effort-queue', '100', '100')
         qoslib.register_queue(queue)
         mangle = qoslib.QoSLib.mangle(self.dp)
         mangle.add_property('action', 'mark-packet').\
-            add_property('new-packet-mark', 'best-effort')
+            add_property('new-packet-mark', 'best-effort').\
+            add_property('src-address', '10.0.1.0/24')
         self.qoslib.add_mangle(mangle)
+        mangle = qoslib.QoSLib.mangle(self.dp)
+        mangle.add_property('action', 'accept').\
+            add_property('queue', 'best-effort-queue').\
+            add_property('packet-mark', 'best-effort').\
+            add_property('chain', 'output')
         msg = get_flow_stats(self.dp, self.waiters, self.ofctl)
         print 'TEST:%s', msg
 
