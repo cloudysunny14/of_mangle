@@ -56,8 +56,9 @@ MANGLE_ACTION_DENY = 'deny'
 MANGLE_ACTION_CONTROLLER = 'controller'
 MANGLE_ACTION_ADD_DST_TO_ADDRESS_LIST = 'add-dst-to-address-list'
 MANGLE_ACTION_ADD_SRC_TO_ADDRESS_LIST = 'add-src-to-address-list'
-MANGLE_JUMP = 'jump'
 MANGLE_ACTION_MARK_PACKET = 'mark-packet'
+MANGLE_JUMP = 'jump'
+MANGLE_QUEUE = 'queue'
 
 MANGLE_JUMP_TARGET = 'jump-target'
 MANGLE_ADDRESS_LIST = 'address-list'
@@ -67,6 +68,7 @@ MANGLE_DST_ADDRESS_LIST = 'dst-address-list'
 MANGLE_SRC_ADDRESS_LIST = 'src-address-list'
 MANGLE_PROTOCOL = 'protocol'
 MANGLE_LIMIT = 'limit'
+MANGLE_NEW_PACKET_MARK = 'new-packet-mark'
 
 # TODO:Compatible with address type
 MANGLE_DST_ADDRESS_TYPE = 'dst-address-type'
@@ -76,6 +78,7 @@ MANGLE_ADDRESS_TYPE_UNICAST = 'unicast'
 MANGLE_ADDRESS_TYPE_BROADCAST = 'broadcast'
 MANGLE_ADDRESS_TYPE_BROADCAST = 'local'
 MANGLE_IP_MULTICAST = '224.0.0.0/4'
+MANGLE_PACKET_MARK = 'packet-mark'
 
 # TODO: Compatibale with match mac-address
 MANGLE_DST_MAC_ADDRESS = 'dst-mac-address'
@@ -312,10 +315,13 @@ class _Mangle(object):
                 self.has_address_list = True
 
         if MANGLE_JUMP in self.properties:
-            if MANGLE_JUMP_TARGET not in self.propoeries:
+            if MANGLE_JUMP_TARGET not in self.properies:
                 return False, 'Action jump required to specify\
                                jump target.'
-
+        if MANGLE_ACTION_MARK_PACKET in self.properties:
+            if MANGLE_NEW_PACKET_MARK not in self.properties:
+                return False, 'Action mark-packet required to specify\
+                               new-packet-mark property'
         LOG.debug('%s', msgs)
         return True, ''
 
@@ -351,6 +357,23 @@ class _Action(object):
         elif value == MANGLE_ACTION_ADD_DST_TO_ADDRESS_LIST or\
                 value == MANGLE_ACTION_ADD_SRC_TO_ADDRESS_LIST:
             pass
+        elif value == MANGLE_ACTION_MARK_PACKET:
+            key = properties[MANGLE_NEW_PACKET_MARK]
+            value = self.switch.mark_packet(key)
+            actions = [{'type': 'SET_FIELD',
+                        'field': 'ip_dscp',
+                        'value': value}]
+
+        if MANGLE_QUEUE in properties:
+            queue_name = properties[MANGLE_QUEUE]
+            queue_id = self.switch.get_queue_id(queue_name)
+            queue_action = {'type': 'SET_QUEUE',
+                            'queue_id': queue_id}
+            if len(actions) > 0:
+                actions.append(queue_action)
+            else:
+                actions = [queue_action]
+                
         return actions
 
 
@@ -516,6 +539,24 @@ class _Switch(object):
                 (self.current_list_value << MANGLE_ADDRESS_LIST_SHIFT)
             self.address_list[list_name] = cookie_value
         return self.address_list[list_name]
+
+    def mark_packet(self, mark):
+        dscp = self.dscp_mark_mapping.get(mark, self.current_dscp)
+        if mark not in self.dscp_mark_mapping:
+            self.dscp_mark_mapping[mark] = dscp
+            self.current_dscp = dscp + 1
+        return dscp
+
+    def get_dscp_value(self, mark):
+        if mark not in self.dscp_mark_mapping:
+            raise Exception()
+        return self.dscp_mark_mapping[mark]
+
+    def get_queue_id(self, queue_name):
+        if queue_name not in self.queues:
+            raise Exception()
+        queue_ids = self.queues[queue_name].values()
+        return queue_ids[0]
 
 def _str_to_dpid(dpid):
     dpid_str = str(dpid)
