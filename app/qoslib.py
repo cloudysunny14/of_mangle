@@ -234,7 +234,7 @@ class QoSLib(app_manager.RyuApp):
             resources = switch.queues[queue.name].keys()
         elif len(switch.queues.values()):
             for queues in queue.queue_ids.values():
-                filled_res = reduce(lambda q1, q2: q1 + q2,
+                filled_res = reduce(lambda ql, qr: ql + qr,
                                        switch.queues.values())
                 f_queue = list(set(queues) - set(filled_res))
                 if len(f_queue):
@@ -314,6 +314,11 @@ class _Mangle(object):
             else:
                 self.has_address_list = True
 
+        if MANGLE_PACKET_MARK in self.properties:
+            mark = self.properties[MANGLE_PACKET_MARK]
+            value = switch.get_dscp_value(mark)
+            self.properties[MANGLE_PACKET_MARK] = value
+
         if MANGLE_JUMP in self.properties:
             if MANGLE_JUMP_TARGET not in self.properies:
                 return False, 'Action jump required to specify\
@@ -386,11 +391,14 @@ class _Match(object):
                         MANGLE_SRC_ADDRESS:
                         {'dl_type': ether.ETH_TYPE_IP},
                         MANGLE_PROTOCOL:
+                        {'dl_type': ether.ETH_TYPE_IP},
+                        MANGLE_PACKET_MARK:
                         {'dl_type': ether.ETH_TYPE_IP}}
 
     _CONVERT_KEY = {MANGLE_DST_ADDRESS: 'ipv4_dst',
                     MANGLE_SRC_ADDRESS: 'ipv4_src',
-                    MANGLE_PROTOCOL: 'nw_proto'}
+                    MANGLE_PROTOCOL: 'nw_proto',
+                    MANGLE_PACKET_MARK: 'ip_dscp'}
 
     _CONVERT_PROTOCOL = {MANGLE_NW_PROTO_TCP: inet.IPPROTO_TCP,
                          MANGLE_NW_PROTO_UDP: inet.IPPROTO_UDP,
@@ -414,7 +422,8 @@ class _Match(object):
                 match_key = _Match._CONVERT_KEY[key]
                 match_value = _Match._CONVERT_PROTOCOL.get(match_property[key],
                                                            match_property[key])
-                match[match_key] = match_value
+                LOG.info("KEY:%s, VALUE:%s" % (match_key, match_value))
+                match.update({match_key: match_value})
         return match
 
     def to_openflow(self):
@@ -541,6 +550,7 @@ class _Switch(object):
         return self.address_list[list_name]
 
     def mark_packet(self, mark):
+        LOG.info("MARK PACKET")
         dscp = self.dscp_mark_mapping.get(mark, self.current_dscp)
         if mark not in self.dscp_mark_mapping:
             self.dscp_mark_mapping[mark] = dscp
@@ -620,7 +630,6 @@ class _QueueTree(object):
         if len(set(queue_id_map.values())) > 1:
             # Incorrect queue sequence.
             raise Exception()
-        LOG.info("Mapped Queue:%s", queue_id_map)
         return queue_id_map
 
     def edit_config(self, resources):
@@ -646,7 +655,6 @@ class _QueueTree(object):
                 self.peer.edit_config(OF_CONFIG_TARGET, capable_switch)
             except Exception, e:
                print e
-
 
 class _OFCtl(object):
 

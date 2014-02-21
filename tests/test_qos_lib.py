@@ -81,7 +81,6 @@ class TestQosLib(unittest.TestCase):
             add_property('src-address-list', 'first').\
             add_property('chain', 'forward')
         self.qoslib.add_mangle(mangle)
-
-
+    
 if __name__ == '__main__':
     unittest.main()

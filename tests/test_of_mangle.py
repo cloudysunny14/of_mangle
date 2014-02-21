@@ -121,7 +121,6 @@ from app import qoslib
 LOG = logging.getLogger(__name__)
 LOG_TEST_FINISH = 'TEST_FINISHED: Tests=[%s] (OK=%s NG=%s SKIP=%s)'
 
-
 def get_flow_stats(dp, waiters, ofctl):
     table_id = dp.ofproto.OFPTT_ALL
     flags = 0
@@ -155,8 +154,7 @@ def get_flow_stats(dp, waiters, ofctl):
     flows = {str(dp.id): flows}
 
     return flows
-
-
+     
 def delete_all_flows(dp):
     match = dp.ofproto_parser.OFPMatch()
     m = dp.ofproto_parser.OFPFlowMod(dp, 0, 0, dp.ofproto.OFPTT_ALL,
@@ -282,7 +280,7 @@ class OFMangleTester(app_manager.RyuApp):
     def test_queue_configuration(self):
         queue = qoslib.QoSLib.queue_tree(self.capable_switch, self.dp)
         queue.queue('best-effort-queue', '100', '100')
-        qoslib.register_queue(queue)
+        self.qoslib.register_queue(queue)
         mangle = qoslib.QoSLib.mangle(self.dp)
         mangle.add_property('action', 'mark-packet').\
             add_property('new-packet-mark', 'best-effort').\
@@ -292,7 +290,8 @@ class OFMangleTester(app_manager.RyuApp):
         mangle.add_property('action', 'accept').\
             add_property('queue', 'best-effort-queue').\
             add_property('packet-mark', 'best-effort').\
-            add_property('chain', 'output')
+            add_property('chain', 'forward')
+        self.qoslib.add_mangle(mangle)
         msg = get_flow_stats(self.dp, self.waiters, self.ofctl)
         print 'TEST:%s', msg
 
