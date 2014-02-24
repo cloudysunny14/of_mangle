@@ -284,7 +284,8 @@ class OFMangleTester(app_manager.RyuApp):
         mangle = qoslib.QoSLib.mangle(self.dp)
         mangle.add_property('action', 'mark-packet').\
             add_property('new-packet-mark', 'best-effort').\
-            add_property('src-address', '10.0.1.0/24')
+            add_property('src-address', '10.0.1.0/24').\
+            add_property('jump', 'forward')
         self.qoslib.add_mangle(mangle)
         mangle = qoslib.QoSLib.mangle(self.dp)
         mangle.add_property('action', 'accept').\
@@ -293,7 +294,15 @@ class OFMangleTester(app_manager.RyuApp):
             add_property('chain', 'forward')
         self.qoslib.add_mangle(mangle)
         msg = get_flow_stats(self.dp, self.waiters, self.ofctl)
-        print 'TEST:%s', msg
+        flow = msg[msg.keys()[0]]
+        return ([{'hard_timeout': 0, 'actions':
+            ['SET_FIELD: {ip_dscp:1}', 'GOTO_TABLE:2'], 'priority': 0,
+            'idle_timeout': 0, 'cookie': 0, 'table_id': 0,
+            'match': {'dl_type': 2048, 'nw_src': '10.0.1.0/24'}},
+            {'hard_timeout': 0, 'actions': ['SET_QUEUE:2',
+              'GOTO_TABLE:3'], 'priority': 0, 'idle_timeout': 0,
+              'cookie': 0, 'table_id': 2, 'match': {'dl_type': 2048,
+                'ip_dscp': 1}}] == flow)
 
     def _print_results(self):
         LOG.info("TEST_RESULTS:")

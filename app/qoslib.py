@@ -240,8 +240,9 @@ class QoSLib(app_manager.RyuApp):
                 if len(f_queue):
                     resources.append(f_queue[0])
         else:
-          for queues in queue.queue_ids.values():
-              resources.append(queues[0])
+            for queues in queue.queue_ids.values():
+                if len(queues):
+                    resources.append(queues[0])
         if not len(resources):
             raise Exception()
         queue_id_mapping = queue.get_queue_mapping(resources)
@@ -297,6 +298,7 @@ class _Mangle(object):
                 # Action accept is can't set to output chain.
                 self.properties[MANGLE_CHAIN] = MANGLE_INPUT_TABLE_ID
                 pass
+
         if MANGLE_ACTION_ADD_DST_TO_ADDRESS_LIST in self.properties or \
            MANGLE_ACTION_ADD_SRC_TO_ADDRESS_LIST in self.properties:
             if MANGLE_ADDRESS_LIST not in self.properties:
@@ -318,11 +320,7 @@ class _Mangle(object):
             mark = self.properties[MANGLE_PACKET_MARK]
             value = switch.get_dscp_value(mark)
             self.properties[MANGLE_PACKET_MARK] = value
-
-        if MANGLE_JUMP in self.properties:
-            if MANGLE_JUMP_TARGET not in self.properies:
-                return False, 'Action jump required to specify\
-                               jump target.'
+        
         if MANGLE_ACTION_MARK_PACKET in self.properties:
             if MANGLE_NEW_PACKET_MARK not in self.properties:
                 return False, 'Action mark-packet required to specify\
@@ -350,16 +348,41 @@ class _Action(object):
         self.mangle = mangle
         self.switch = switch
 
+    def _get_next_table(self):
+        properties = self.mangle.properties
+        value = properties[MANGLE_ACTION]
+        table_id = properties.get(MANGLE_CHAIN,
+            MANGLE_INPUT_TABLE_ID)
+        if value == MANGLE_ACTION_ACCEPT:
+            table_id = MANGLE_OUTPUT_TABLE_ID
+        elif MANGLE_JUMP in properties:
+            table_name = properties[MANGLE_JUMP]
+            if table_name == MANGLE_CHAIN_PREFORWARD:
+                table_id = MANGLE_PREFORWARD_TABLE_ID
+            elif table_name == MANGLE_CHAIN_FORWARD:
+                table_id = MANGLE_FORWARD_TABLE_ID
+            elif table_name == MANGLE_CHAIN_OUTPUT:
+                table_id = MANGLE_OUTPUT_TABLE_ID
+            elif table_name == MANGLE_CHAIN_INPUT:
+                pass
+            else: 
+                table_id = self.switch.chains_to_table_id(
+                    properties[MANGLE_JUMP])
+        elif table_id == MANGLE_INPUT_TABLE_ID:
+            table_id = MANGLE_PREFORWARD_TABLE_ID
+        elif table_id == MANGLE_PREFORWARD_TABLE_ID:
+            table_id = MANGLE_FORWARD_TABLE_ID
+        elif table_id == MANGLE_FORWARD_TABLE_ID:
+            table_id = MANGLE_OUTPUT_TABLE_ID
+        return table_id
+            
     def to_openflow(self):
         properties = self.mangle.properties
         if MANGLE_ACTION not in properties:
             raise Exception()
         value = properties[MANGLE_ACTION]
         actions = []
-        if value == MANGLE_ACTION_ACCEPT:
-            actions = [{'type': 'GOTO_TABLE',
-                        'table_id': MANGLE_OUTPUT_TABLE_ID}]
-        elif value == MANGLE_ACTION_ADD_DST_TO_ADDRESS_LIST or\
+        if value == MANGLE_ACTION_ADD_DST_TO_ADDRESS_LIST or\
                 value == MANGLE_ACTION_ADD_SRC_TO_ADDRESS_LIST:
             pass
         elif value == MANGLE_ACTION_MARK_PACKET:
@@ -369,6 +392,11 @@ class _Action(object):
                         'field': 'ip_dscp',
                         'value': value}]
 
+        goto_table_id = self._get_next_table()
+        if goto_table_id != MANGLE_INPUT_TABLE_ID:
+            actions.append({'type': 'GOTO_TABLE',
+                            'table_id': goto_table_id})
+            
         if MANGLE_QUEUE in properties:
             queue_name = properties[MANGLE_QUEUE]
             queue_id = self.switch.get_queue_id(queue_name)
