@@ -126,8 +126,8 @@ def get_flow_stats(dp, waiters, ofctl):
     flags = 0
     out_port = dp.ofproto.OFPP_ANY
     out_group = dp.ofproto.OFPG_ANY
-    cookie = 0
-    cookie_mask = 0
+    cookie = 0 
+    cookie_mask = 0 
     match = dp.ofproto_parser.OFPMatch()
 
     stats = dp.ofproto_parser.OFPFlowStatsRequest(
@@ -182,7 +182,7 @@ class OFMangleTester(app_manager.RyuApp):
         super(OFMangleTester, self).__init__(*args, **kwargs)
         self.dpset = kwargs['dpset']
         self.qoslib = kwargs['qoslib']
-        self.qoslib.use_switch_flow = False
+        self.qoslib.use_switch_flow = False 
         self.waiters = {}
         self.pending = []
         self.results = {}
@@ -263,13 +263,65 @@ class OFMangleTester(app_manager.RyuApp):
         self.qoslib.add_mangle(mangle)
         msg = get_flow_stats(self.dp, self.waiters, self.ofctl)
         flow = msg[msg.keys()[0]]
+        LOG.info(flow)
         return ([{'hard_timeout': 0, 'actions': ['GOTO_TABLE:3'],
-                  'priority': 0, 'idle_timeout': 0, 'cookie': 1056768,
+                  'priority': 0, 'idle_timeout': 0, 'cookie': 2113536,
                   'table_id': 2, 'match': {'dl_type': 2048, 'nw_dst': '10.0.0.3'}},
                  {'hard_timeout': 0, 'actions': ['GOTO_TABLE:3'],
-                  'priority': 0, 'idle_timeout': 0, 'cookie': 1056768,
+                  'priority': 0, 'idle_timeout': 0, 'cookie': 2113536,
                   'table_id': 2,
                   'match': {'dl_type': 2048, 'nw_dst': '10.0.0.2'}}] == flow)
+    
+    def test_add_address_list(self):
+        mangle = qoslib.QoSLib.mangle(self.dp)
+        mangle.address_list('add_telnet', ['10.0.2.1', '10.0.3.1'])
+        mangle.add_property('action', 'add-dst-to-address-list').\
+            add_property('address-list', 'add_telnet').\
+            add_property('dst-port', 5001).\
+            add_property('chain', 'input').\
+            add_property('priority', 100)
+        self.qoslib.add_mangle(mangle)
+        mangle = qoslib.QoSLib.mangle(self.dp)
+        mangle.add_property('action', 'mark-packet').\
+            add_property('src-address-list', 'add_telnet').\
+            add_property('new-packet-mark', 'drop').\
+            add_property('chain', 'preforward')
+        self.qoslib.add_mangle(mangle)
+        mangle = qoslib.QoSLib.mangle(self.dp)
+        mangle.add_property('action', 'accept').\
+            add_property('chain', 'input').\
+            add_property('priority', 0)
+        self.qoslib.add_mangle(mangle)
+        msg = get_flow_stats(self.dp, self.waiters, self.ofctl)
+        flow = msg[msg.keys()[0]]
+        LOG.info(flow)
+        return ([{'hard_timeout': 0, 'actions': ['OUTPUT:4294967293'],
+          'priority': 100, 'idle_timeout': 0, 'cookie': 1048576,
+          'table_id': 0, 'match': {'dl_type': 2048, 'nw_proto': 6,
+          'tp_dst': 5001}}, {'hard_timeout': 0,
+          'actions': ['GOTO_TABLE:3'], 'priority': 0, 'idle_timeout': 0,
+          'cookie': 0, 'table_id': 0, 'match': {}}, {'hard_timeout': 0, 
+          'actions': ['SET_FIELD: {ip_dscp:2}', 'GOTO_TABLE:2'],
+          'priority': 0, 'idle_timeout': 0, 'cookie': 1056768,
+          'table_id': 1, 'match': {'dl_type': 2048,
+          'nw_src': '10.0.3.1'}}, {'hard_timeout': 0,
+          'actions': ['SET_FIELD: {ip_dscp:2}', 'GOTO_TABLE:2'], 
+          'priority': 0, 'idle_timeout': 0, 'cookie': 1056768, 
+          'table_id': 1, 'match': {'dl_type': 2048, 
+          'nw_src': '10.0.2.1'}}] == flow)
+                  
+    def test_match_mac(self):
+        mangle = qoslib.QoSLib.mangle(self.dp)
+        mangle.add_property('action', 'accept').\
+            add_property('dst-mac-address', '11:11:11:11:11:11').\
+            add_property('chain', 'forward')
+        self.qoslib.add_mangle(mangle)
+        msg = get_flow_stats(self.dp, self.waiters, self.ofctl)
+        flow = msg[msg.keys()[0]]
+        return ([{'hard_timeout': 0, 'actions': ['GOTO_TABLE:3'],
+                 'priority': 0, 'idle_timeout': 0, 'cookie': 0,
+                 'table_id': 2, 'match': {'dl_dst':
+                      '11:11:11:11:11:11'}}] == flow)
 
     def test_add_queue(self):
         queue = qoslib.QoSLib.queue_tree(self.capable_switch, self.dp)
@@ -295,6 +347,7 @@ class OFMangleTester(app_manager.RyuApp):
         self.qoslib.add_mangle(mangle)
         msg = get_flow_stats(self.dp, self.waiters, self.ofctl)
         flow = msg[msg.keys()[0]]
+        LOG.info(flow)
         return ([{'hard_timeout': 0, 'actions':
             ['SET_FIELD: {ip_dscp:1}', 'GOTO_TABLE:2'], 'priority': 0,
             'idle_timeout': 0, 'cookie': 0, 'table_id': 0,
@@ -321,6 +374,5 @@ class OFMangleTester(app_manager.RyuApp):
         """"""
         for test in self.pending:
             delete_all_flows(self.dp)
-            self.dp.send_barrier()
             self.results[test] = getattr(self, test)()
         self._print_results()
