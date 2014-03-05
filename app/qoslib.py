@@ -41,7 +41,7 @@ IPV4 = ipv4.ipv4.__name__
 OUTPUT_CONTROLLER = 0xfffffffd
 ARP_FLOW_PRIORITY = ofproto_v1_3_parser.UINT16_MAX - 1
 OUTPUT_FLOW_PRIORITY = ofproto_v1_3_parser.UINT16_MAX >> 1
-LISTED_FLOW_PRIORITY = ofproto_v1_3_parser.UINT16_MAX >> 2
+NORMAL_FLOW_PRIORITY = ofproto_v1_3_parser.UINT16_MAX >> 2
 # Built-in chain
 # [INPUT] - [PREFORWARD] -[FORWARD] - [OUTPUT]
 #TODO: repeal this rules
@@ -295,8 +295,13 @@ class _Mangle(object):
                list_name not in switch.address_list:
                 return False, 'Specify list is not exist'
             else:
+                priority = self.properties.get(MANGLE_PRIORITY, 
+                    MANGLE_DEFAULT_PRIORITY)
+                chain = self.properties.get(MANGLE_CHAIN,
+                    MANGLE_CHAIN_INPUT)
                 switch.put_address_list(list_name,
-                    self.address_list_dict.get(list_name, []))
+                    self.address_list_dict.get(list_name, []),
+                    priority, chain)
 
         is_src = MANGLE_ACTION_ADD_SRC_TO_ADDRESS_LIST in \
                 self.properties
@@ -524,13 +529,17 @@ class _Switch(object):
         self.dscp_mark_mapping = {}
         self.current_dscp = 1
 
-    def put_address_list(self, list_name, address_list):
+    def put_address_list(self, list_name, address_list,
+        priority, chain):
         if list_name not in self.address_list:
             self.address_list[list_name] = {}
             self.address_list[list_name]['address'] = []
         address = self.address_list[list_name]['address']
         address = address + address_list
         self.address_list[list_name]['address'] = address
+        priorities = self.address_list[list_name].get('priority', {})
+        priorities[chain] = priority
+        self.address_list[list_name]['priority'] = priorities
         LOG.info("put_list%s, %s" % (self.address_list, list_name))
 
     def get_address_list(self, list_name):
@@ -595,30 +604,39 @@ class _Switch(object):
                 cookies.append(cookie)
         return cookies
 
-    def _update_list(self, list_name, chain, cookie, address, is_src):
+    def _update_list(self, list_name, chain,
+        cookie, address, is_src, priority):
         """ Update list actions with correspod
         to list actions """
-        LOG.info('%s, %s, %s, %s' % (list_name, chain, cookie, address))
+        address_list = self.address_list[list_name]['address']
+        if address not in address_list:
+            address_list.append(address)
+        LOG.info('list_action_update_list:%s', self.address_list)
         list_action = self.address_list[list_name]['list_action']
         actions = list_action.get(cookie, [])
+        
         add_property_key = MANGLE_DST_ADDRESS
         if is_src:
             add_property_key = MANGLE_SRC_ADDRESS
             
         match = {add_property_key: address}
         match = _Match.convert_match(match, None)
-        table_id = chain + 1 
-        actions.append({'type': 'GOTO_TABLE',
-                       'table_id': table_id})
+        table_id = self.chains_to_table_id(chain)
+        next_table_id = table_id + 1 
+        next_table_action = {'type': 'GOTO_TABLE',
+            'table_id': next_table_id}
+        if next_table_action not in actions:
+            actions.append(next_table_action)
 
         LOG.info('match:%s', match)
-        flow = QoSLib.to_of_flow(chain, cookie,
-            MANGLE_DEFAULT_COOKIE_MASK, LISTED_FLOW_PRIORITY,
+        # Address that was added later to set a high priority
+        flow = QoSLib.to_of_flow(table_id, cookie,
+            MANGLE_DEFAULT_COOKIE_MASK, priority + 1, 
             match, actions, 0)
         LOG.info("send_flows:%s", flow)
         cmd = self.datapath.ofproto.OFPFC_ADD
         self.ofctl.mod_flow_entry(self.datapath, flow, cmd)
-
+        self.datapath.send_barrier()
 
     def _add_list(self, msg, list_name):
         pkt = packet.Packet(msg.data)
@@ -636,10 +654,13 @@ class _Switch(object):
                     address = header_list[IPV4].dst
                
                 for cookie in cookies:
-                    chain = (cookie & MANGLE_CHAIN_COOKIE_MASK) >> \
+                    table_id = (cookie & MANGLE_CHAIN_COOKIE_MASK) >> \
                         MANGLE_CHAIN_LIST_SHIFT
+                    priorities = self.address_list[list_name]['priority']
+                    chain = self.table_id_to_chain(table_id)
+                    priority = priorities.get(chain, 0)
                     self._update_list(list_name, chain, cookie,
-                        address, is_src)
+                        address, is_src, priority)
         
     def packet_in_handler(self, ev):
         msg = ev.msg
@@ -686,6 +707,11 @@ class _Switch(object):
         if chain not in self.chains:
             raise Exception()
         return self.chains[chain]
+
+    def table_id_to_chain(self, table_id):
+        for k,v in self.chains.iteritems():
+            if v == table_id:
+                return k
 
     def get_cookie_for_list(self, list_name, table_id, is_src):
         cookies = self._create_cookie_list(list_name)
