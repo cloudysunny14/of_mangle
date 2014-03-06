@@ -217,23 +217,31 @@ class QoSLib(app_manager.RyuApp):
                 if len(queues):
                     resources.append(queues[0])
         if not len(resources):
-            raise Exception()
+            raise MangleInconsistencyError(msg='Resources in capable \
+                switch is not have queue resources.')
         queue_id_mapping = queue.get_queue_mapping(resources)
         switch.queues[queue.name] = queue_id_mapping
         queue.edit_config(resources)
 
 
 class MangleAlreadyBuildError(RyuException):
-    message = 'Mangle is already build. : mangle=%(mangle)s'
+    message = 'Mangle is already build : mangle=%(mangle)s'
 
 
 class MangleAlreadyAddedListError(RyuException):
-    message = 'Mangle is already build. : list_name=%(list_name)s,\
+    message = 'Mangle is already build : list_name=%(list_name)s,\
                list=%(list)s'
 
+class MangleBuildError(RyuException):
+    message = 'Mangle could\'n build : msg=%(msg)s mangle=%(mangle)s'
 
-class MangleValidateError(RyuException):
-    message = 'Mangle is not valid : msg=%(msg)s mangle=%(mangle)s'
+
+class MangleCommandError(RyuException):
+  message = 'Mangle command error : msg=%(msg)s'
+
+
+class MangleInconsistencyError(RyuException):
+  message = 'Mangle unexpected inconsistency error : msg=%(msg)s'
 
 
 class _Mangle(object):
@@ -263,7 +271,7 @@ class _Mangle(object):
                                               list=add_list)
         self.address_list_dict[list_name] = address_list
 
-    def _validate_mangle(self, switch):
+    def _build_mangle(self, switch):
         """Validate mangle entry"""
         # Search flow table.etc
         mangle_chain = self.properties.get(MANGLE_CHAIN,
@@ -323,9 +331,9 @@ class _Mangle(object):
         return True, ''
 
     def build(self, switch):
-        result, msg = self._validate_mangle(switch)
+        result, msg = self._build_mangle(switch)
         if not result:
-            raise MangleValidateError(msg=msg, mangle=self.properties)
+            raise MangleBuildError(msg=msg, mangle=self.properties)
         self.is_built = True
         return self
 
@@ -376,7 +384,7 @@ class _Action(object):
     def to_openflow(self):
         properties = self.mangle.properties
         if MANGLE_ACTION not in properties:
-            raise Exception()
+            raise MangleCommandError(msg='Must specify action.')
         value = properties[MANGLE_ACTION]
         LOG.info("value:%s", value)
         actions = []
@@ -705,7 +713,8 @@ class _Switch(object):
 
     def chains_to_table_id(self, chain):
         if chain not in self.chains:
-            raise Exception()
+            raise MangleInconsistencyError(msg='Specified chain is\
+                not exist')
         return self.chains[chain]
 
     def table_id_to_chain(self, table_id):
@@ -743,12 +752,14 @@ class _Switch(object):
 
     def get_dscp_value(self, mark):
         if mark not in self.dscp_mark_mapping:
-            raise Exception()
+            raise MangleInconsistencyError(msg='Specified mark is\
+                not exist')
         return self.dscp_mark_mapping[mark]
 
     def get_queue_id(self, queue_name):
         if queue_name not in self.queues:
-            raise Exception()
+            raise MangleInconsistencyError(msg='Specified queue is\
+                not exist')
         queue_ids = self.queues[queue_name].values()
         return queue_ids[0]
 
@@ -784,8 +795,7 @@ class _QueueTree(object):
         """"""
         result, msg = self._validation()
         if not result:
-            #TODO: 
-            raise Exception()
+            raise MangleCommandError(msg=msg)
         self.name = name 
         self.min_rate = min_rate
         self.max_rate = max_rate
@@ -813,7 +823,7 @@ class _QueueTree(object):
                 queue_id_map[queue_resource_id] = str(queue.id)
         if len(set(queue_id_map.values())) > 1:
             # Incorrect queue sequence.
-            raise Exception()
+            raise MangleInconsistencyError(msg='Invalid queues')
         return queue_id_map
 
     def edit_config(self, resources):
@@ -833,12 +843,12 @@ class _QueueTree(object):
                     )
                 )
             except TypeError:
-                print "argument error"
+                raise MangleCommandError(msg='argument error')
                 return
             try:
                 self.peer.edit_config(OF_CONFIG_TARGET, capable_switch)
             except Exception, e:
-               print e
+                raise MangleCommandError(msg=e)
 
 class _OFCtl(object):
 

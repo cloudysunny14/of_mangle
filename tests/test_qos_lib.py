@@ -65,7 +65,7 @@ class TestQosLib(unittest.TestCase):
         mangle.address_list('second', ['10.0.0.2', '10.0.0.3'])
         mangle.address_list('first', ['10.0.1.2', '10.0.1.3'])
 
-    @raises(qoslib.MangleValidateError)
+    @raises(qoslib.MangleBuildError)
     def test_mangle_list_not_exist(self):
         mangle = qoslib.QoSLib.mangle(self.datapath)
         mangle.address_list('first', ['10.0.1.2', '10.0.1.3'])
